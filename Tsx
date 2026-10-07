@@ -1,0 +1,353 @@
+"use client";
+import { useEffect, useRef, useState } from "react";
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient("https://cuycjulexeddyyoyxkti.supabase.co", "sb_publishable_UwGu1yBlMypgL0PEGtN02A_RYrMDPDd");
+const UPI = "9519210344@ybl";
+const PKGS = [{ inr: 50, coins: 5000 }, { inr: 100, coins: 10000 }];
+const inp = "w-full rounded-xl border border-line bg-white px-4 py-3 outline-none focus:border-ink";
+const btn = "w-full rounded-xl bg-ink py-3.5 font-semibold text-white disabled:opacity-50";
+const fmt = (n: number) => n.toLocaleString("en-IN");
+function Err({ t }: { t: string }) {
+  return t ? <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-bad">{t}</p> : null;
+}
+
+export default function App() {
+  const [ready, setReady] = useState(false);
+  const [uid, setUid] = useState<string | null>(null);
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => { setUid(data.session?.user.id ?? null); setReady(true); });
+    const { data: l } = supabase.auth.onAuthStateChange((_e, s) => setUid(s?.user.id ?? null));
+    return () => l.subscription.unsubscribe();
+  }, []);
+  if (!ready) return null;
+  return uid ? <Main uid={uid} /> : <Auth />;
+}
+
+function Auth() {
+  const [signup, setSignup] = useState(false);
+  const [u, setU] = useState(""); const [e, setE] = useState(""); const [p, setP] = useState("");
+  const [err, setErr] = useState(""); const [busy, setBusy] = useState(false);
+
+  async function submit(ev: React.FormEvent) {
+    ev.preventDefault(); setErr("");
+    if (signup) {
+      if (!/^[a-zA-Z0-9_]{3,20}$/.test(u)) return setErr("Username: 3-20 letters, numbers or _");
+      const { data } = await supabase.rpc("username_available", { u });
+      if (!data) return setErr("That username is taken.");
+    }
+    setBusy(true);
+    const r = signup
+      ? await supabase.auth.signUp({ email: e, password: p, options: { data: { username: u } } })
+      : await supabase.auth.signInWithPassword({ email: e, password: p });
+    setBusy(false);
+    if (r.error) return setErr(r.error.message);
+    if (signup && !r.data.session) setErr("Account created. Turn off 'Confirm email' in Supabase, then log in.");
+  }
+
+  return (
+    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6 py-10">
+      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-coin text-xl font-bold">₵</div>
+      <h1 className="text-3xl font-bold">{signup ? "Start with 200 free coins" : "Welcome back"}</h1>
+      <p className="mb-6 mt-2 text-muted">{signup ? "Watch videos to earn coins. Spend coins to get your videos watched." : "Log in to keep earning."}</p>
+      <form onSubmit={submit} className="space-y-4">
+        {signup && (<div><label className="mb-1 block text-sm font-medium">Username</label>
+          <input className={inp} value={u} onChange={(x) => setU(x.target.value)} autoComplete="username" /></div>)}
+        <div><label className="mb-1 block text-sm font-medium">Email</label>
+          <input type="email" required className={inp} value={e} onChange={(x) => setE(x.target.value)} autoComplete="email" /></div>
+        <div><label className="mb-1 block text-sm font-medium">Password</label>
+          <input type="password" required minLength={6} className={inp} value={p} onChange={(x) => setP(x.target.value)} autoComplete={signup ? "new-password" : "current-password"} /></div>
+        <Err t={err} />
+        <button disabled={busy} className={btn}>{busy ? "Please wait..." : signup ? "Create account" : "Log in"}</button>
+      </form>
+      <button onClick={() => { setSignup(!signup); setErr(""); }} className="mt-6 text-center text-sm text-muted underline">
+        {signup ? "Already have an account? Log in" : "New here? Create an account"}
+      </button>
+    </main>
+  );
+}
+
+function Main({ uid }: { uid: string }) {
+  const [tab, setTab] = useState("home");
+  const [watch, setWatch] = useState<any>(null);
+  const [me, setMe] = useState<any>(null);
+  const load = async () => { const r = await supabase.from("profiles").select("*").eq("id", uid).single(); setMe(r.data); };
+  useEffect(() => { load(); }, []);
+  if (!me) return <p className="p-6 text-muted">Loading...</p>;
+  const items = [["home", "▶", "Earn"], ["add", "＋", "Add video"], ["wallet", "₹", "Wallet"], ["profile", "☺", "Profile"]];
+  return (
+    <div className="mx-auto min-h-screen max-w-md pb-24">
+      {watch ? <Watch camp={watch} onExit={() => { setWatch(null); load(); }} />
+        : tab === "home" ? <Home me={me} onWatch={setWatch} />
+        : tab === "add" ? <Add me={me} done={() => { load(); setTab("home"); }} />
+        : tab === "wallet" ? <Wallet me={me} reload={load} />
+        : <Profile me={me} reload={load} />}
+      {!watch && (
+        <nav className="fixed inset-x-0 bottom-0 border-t border-line bg-white">
+          <div className="mx-auto flex max-w-md">
+            {items.map(([k, ic, lb]) => (
+              <button key={k} onClick={() => setTab(k)} className={`flex-1 py-2.5 text-xs font-medium ${tab === k ? "text-ink" : "text-muted"}`}>
+                <div className="text-xl leading-none">{ic}</div>{lb}
+                <div className={`mx-auto mt-1 h-0.5 w-6 rounded-full ${tab === k ? "bg-coin" : ""}`} />
+              </button>
+            ))}
+          </div>
+        </nav>
+      )}
+    </div>
+  );
+}
+
+function Home({ me, onWatch }: any) {
+  const [list, setList] = useState<any[] | null>(null);
+  useEffect(() => { supabase.rpc("available_campaigns").then((r) => setList(r.data ?? [])); }, []);
+  return (
+    <>
+      <header className="bg-ink px-5 pb-8 pt-8 text-white">
+        <p className="text-sm text-white/70">Hi, {me.username}</p>
+        <p className="mt-3 text-sm text-white/70">Your balance</p>
+        <p className="text-5xl font-bold leading-none">{fmt(me.coins)} <span className="text-2xl text-coin">coins</span></p>
+        <p className="mt-4 text-sm text-white/70">Watch 1 minute, earn 1 coin.</p>
+      </header>
+      <section className="space-y-4 px-5 pt-6">
+        <h2 className="text-xl font-bold">Videos to watch</h2>
+        {list === null && <div className="h-56 animate-pulse rounded-2xl bg-line" />}
+        {list?.length === 0 && <p className="rounded-2xl border border-dashed border-line bg-white p-6 text-center text-muted">Nothing to watch right now. Check again soon.</p>}
+        {list?.map((c) => (
+          <button key={c.id} onClick={() => onWatch(c)} className="block w-full overflow-hidden rounded-2xl border border-line bg-white text-left">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={c.thumbnail} alt="" className="aspect-video w-full object-cover" />
+            <div className="flex items-start justify-between gap-3 p-4">
+              <div><p className="line-clamp-2 font-medium">{c.title}</p><p className="mt-1 text-sm text-muted">{c.minutes_remaining} min wanted</p></div>
+              <span className="shrink-0 rounded-full bg-coin-soft px-3 py-1 text-sm font-semibold text-coin-dark">Earn</span>
+            </div>
+          </button>
+        ))}
+      </section>
+    </>
+  );
+}
+
+function Add({ me, done }: any) {
+  const [url, setUrl] = useState(""); const [meta, setMeta] = useState<any>(null);
+  const [hours, setHours] = useState(1); const [err, setErr] = useState(""); const [busy, setBusy] = useState(false);
+  const cost = hours * 100;
+  async function check() {
+    setErr(""); setMeta(null); setBusy(true);
+    const r = await fetch("/api/yt-meta?url=" + encodeURIComponent(url)); const j = await r.json();
+    setBusy(false); if (r.ok) setMeta(j); else setErr(j.error);
+  }
+  async function publish() {
+    setBusy(true);
+    const { error } = await supabase.rpc("create_campaign", { p_yt: meta.id, p_title: meta.title, p_thumb: meta.thumbnail, p_hours: hours });
+    setBusy(false);
+    if (error) return setErr(/check constraint|coins/i.test(error.message) ? "Not enough coins." : error.message);
+    done();
+  }
+  return (
+    <div className="px-5 pt-8">
+      <h1 className="text-2xl font-bold">Add a video</h1>
+      <p className="mt-1 text-muted">100 coins = 1 hour of watch time.</p>
+      <div className="mt-6 flex gap-2">
+        <input value={url} onChange={(x) => setUrl(x.target.value)} placeholder="Paste YouTube link" className={inp} />
+        <button onClick={check} disabled={!url || busy} className="rounded-xl bg-ink px-4 font-semibold text-white disabled:opacity-50">Check</button>
+      </div>
+      {meta && (
+        <>
+          <div className="mt-5 overflow-hidden rounded-2xl border border-line bg-white">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={meta.thumbnail} alt="" className="aspect-video w-full object-cover" />
+            <p className="p-4 font-medium">{meta.title}</p>
+          </div>
+          <div className="mt-5 rounded-2xl border border-line bg-white p-4">
+            <p className="font-medium">Watch time to buy</p>
+            <div className="mt-3 flex items-center gap-4">
+              <button onClick={() => setHours(Math.max(1, hours - 1))} className="h-10 w-10 rounded-full border border-line text-xl">−</button>
+              <p className="text-2xl font-bold">{hours} hour{hours > 1 ? "s" : ""}</p>
+              <button onClick={() => setHours(hours + 1)} className="h-10 w-10 rounded-full border border-line text-xl">+</button>
+            </div>
+            <p className="mt-3 text-sm text-muted">Cost: <b className="text-ink">{cost} coins</b> · You have {fmt(me.coins)}</p>
+          </div>
+          <button onClick={publish} disabled={busy || cost > me.coins} className="mt-5 w-full rounded-xl bg-coin py-3.5 font-semibold text-ink disabled:opacity-50">
+            {cost > me.coins ? "Not enough coins" : `Pay ${cost} coins and publish`}
+          </button>
+        </>
+      )}
+      <Err t={err} />
+    </div>
+  );
+}
+
+function Watch({ camp, onExit }: any) {
+  const wrap = useRef<HTMLDivElement>(null);
+  const player = useRef<any>(null);
+  const sid = useRef<string | null>(null);
+  const playing = useRef(false); const checking = useRef(false);
+  const secs = useRef(0); const since = useRef(0);
+  const [err, setErr] = useState(""); const [earned, setEarned] = useState(0);
+  const [prog, setProg] = useState(0); const [check, setCheck] = useState(false);
+  const [left, setLeft] = useState(20); const [done, setDone] = useState(false);
+
+  async function credit() {
+    const { error } = await supabase.rpc("credit_minute", { p_session: sid.current });
+    if (error) { if (/finished/i.test(error.message)) { setDone(true); player.current?.pauseVideo(); } return; }
+    setEarned((n) => n + 1);
+  }
+
+  useEffect(() => {
+    let timer: any; let dead = false;
+    (async () => {
+      const s = await supabase.rpc("start_watch", { p_campaign: camp.id });
+      if (s.error) return setErr(s.error.message);
+      if (dead) return;
+      sid.current = s.data;
+      const w = window as any;
+      const make = () => {
+        const el = document.createElement("div");
+        wrap.current?.appendChild(el);
+        player.current = new w.YT.Player(el, {
+          videoId: camp.youtube_id, width: "100%", height: "100%",
+          playerVars: { rel: 0, modestbranding: 1, playsinline: 1 },
+          events: { onStateChange: (e: any) => { playing.current = e.data === 1; } },
+        });
+      };
+      if (w.YT?.Player) make();
+      else { w.onYouTubeIframeAPIReady = make; const t = document.createElement("script"); t.src = "https://www.youtube.com/iframe_api"; document.body.appendChild(t); }
+      timer = setInterval(() => {
+        if (!playing.current || checking.current || document.visibilityState !== "visible") return;
+        secs.current += 1; since.current += 1; setProg(secs.current);
+        if (secs.current >= 60) { secs.current = 0; setProg(0); credit(); }
+        if (since.current >= 180) { checking.current = true; player.current?.pauseVideo(); setLeft(20); setCheck(true); }
+      }, 1000);
+    })();
+    return () => { dead = true; clearInterval(timer); player.current?.destroy?.(); };
+  }, []);
+
+  useEffect(() => {
+    if (!check) return;
+    const t = setInterval(() => setLeft((l) => l - 1), 1000);
+    return () => clearInterval(t);
+  }, [check]);
+  useEffect(() => {
+    if (check && left <= 0) { setCheck(false); checking.current = false; since.current = 0; }
+  }, [left, check]);
+
+  return (
+    <div className="px-5 pt-6">
+      <button onClick={onExit} className="mb-3 text-sm text-muted underline">Back</button>
+      <div ref={wrap} className="aspect-video w-full overflow-hidden rounded-2xl bg-black [&_iframe]:h-full [&_iframe]:w-full" />
+      <h1 className="mt-4 font-medium">{camp.title}</h1>
+      <Err t={err} />
+      <div className="mt-5 rounded-2xl border border-line bg-white p-4">
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-muted">Earned this video</p>
+          <p className="text-2xl font-bold text-coin-dark">+{earned} coins</p>
+        </div>
+        <div className="mt-3 h-2 overflow-hidden rounded-full bg-line"><div className="h-full bg-coin transition-all" style={{ width: `${(prog / 60) * 100}%` }} /></div>
+        <p className="mt-2 text-xs text-muted">Next coin after {60 - prog}s. Timer pauses when the video is paused or the tab is hidden.</p>
+      </div>
+      {done && <p className="mt-4 rounded-lg bg-coin-soft px-3 py-2 text-sm">This video has received all the watch time it paid for.</p>}
+      {check && (
+        <div className="fixed inset-0 z-30 flex items-center justify-center bg-ink/70 p-6" role="dialog" aria-modal="true">
+          <div className="w-full max-w-xs rounded-2xl bg-white p-6 text-center">
+            <p className="text-xl font-bold">Are you watching?</p>
+            <p className="mt-2 text-sm text-muted">Tap within {left}s to keep earning.</p>
+            <button onClick={() => { setCheck(false); checking.current = false; since.current = 0; player.current?.playVideo(); }} className={btn + " mt-5"}>Yes, I'm watching</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Wallet({ me, reload }: any) {
+  const [pkg, setPkg] = useState(PKGS[0]); const [utr, setUtr] = useState("");
+  const [msg, setMsg] = useState<any>(null); const [busy, setBusy] = useState(false);
+  const [rows, setRows] = useState<any[]>([]);
+  const loadRows = () => supabase.from("utr_payments").select("utr,amount_inr,status").order("created_at", { ascending: false }).limit(10).then((r) => setRows(r.data ?? []));
+  useEffect(() => { loadRows(); }, []);
+  const q = `pa=${UPI}&pn=WatchEarn&am=${pkg.inr}.00&cu=INR&tn=WatchEarn%20${pkg.inr}`;
+  async function submit() {
+    setMsg(null);
+    if (!/^\d{12}$/.test(utr)) return setMsg({ ok: false, t: "UTR must be exactly 12 digits." });
+    setBusy(true);
+    const { data, error } = await supabase.rpc("submit_utr", { p_utr: utr, p_inr: pkg.inr });
+    setBusy(false);
+    if (error) return setMsg({ ok: false, t: error.message });
+    setUtr(""); loadRows(); reload();
+    setMsg({ ok: true, t: data === "credited" ? `${fmt(pkg.coins)} coins added.` : "UTR received. Coins are added once your payment is verified." });
+  }
+  return (
+    <div className="px-5 pt-8">
+      <div className="rounded-2xl bg-ink p-5 text-white"><p className="text-sm text-white/70">Coin balance</p><p className="text-4xl font-bold">{fmt(me.coins)}</p></div>
+      <h2 className="mt-6 text-xl font-bold">Add coins</h2>
+      <p className="text-sm text-muted">₹1 = 100 coins = 1 hour of watch time.</p>
+      <div className="mt-3 grid grid-cols-2 gap-3">
+        {PKGS.map((p) => (
+          <button key={p.inr} onClick={() => setPkg(p)} className={`rounded-2xl border-2 bg-white p-4 text-left ${pkg.inr === p.inr ? "border-ink" : "border-line"}`}>
+            <p className="text-2xl font-bold">₹{p.inr}</p><p className="text-sm text-muted">{fmt(p.coins)} coins</p>
+          </button>
+        ))}
+      </div>
+      <div className="mt-5 rounded-2xl border border-line bg-white p-4">
+        <p className="font-medium">1. Pay ₹{pkg.inr}</p>
+        <a href={`phonepe://pay?${q}`} className="mt-3 block rounded-xl bg-[#5F259F] py-3 text-center font-semibold text-white">Pay ₹{pkg.inr} with PhonePe</a>
+        <a href={`upi://pay?${q}`} className="mt-2 block text-center text-sm text-muted underline">Use another UPI app</a>
+        <p className="mt-3 text-xs text-muted">Or pay manually to <b>{UPI}</b>. Send exactly ₹{pkg.inr}.</p>
+        <p className="mt-5 font-medium">2. Enter your 12-digit UTR</p>
+        <input value={utr} onChange={(x) => setUtr(x.target.value.replace(/\D/g, "").slice(0, 12))} inputMode="numeric" placeholder="412345678901" className={inp + " mt-2"} />
+        {msg && <p role="alert" className={`mt-3 rounded-lg px-3 py-2 text-sm ${msg.ok ? "bg-green-50 text-ok" : "bg-red-50 text-bad"}`}>{msg.t}</p>}
+        <button onClick={submit} disabled={busy || utr.length !== 12} className={btn + " mt-3"}>Submit UTR</button>
+      </div>
+      {rows.length > 0 && (<><h3 className="mt-6 font-medium">Recent payments</h3>
+        <ul className="mt-2 space-y-2">{rows.map((r) => (
+          <li key={r.utr} className="flex justify-between rounded-xl border border-line bg-white px-4 py-3 text-sm"><span>₹{r.amount_inr} · {r.utr}</span><span className="text-muted">{r.status === "auto_credited" ? "credited" : r.status}</span></li>
+        ))}</ul></>)}
+    </div>
+  );
+}
+
+function Profile({ me, reload }: any) {
+  const [err, setErr] = useState(""); const [busy, setBusy] = useState(false);
+  async function upload(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0]; if (!f) return;
+    if (f.size > 2 * 1024 * 1024) return setErr("Choose an image under 2 MB.");
+    setErr(""); setBusy(true);
+    const path = `${me.id}/avatar.${f.name.split(".").pop()}`;
+    const up = await supabase.storage.from("avatars").upload(path, f, { upsert: true, contentType: f.type });
+    if (up.error) { setBusy(false); return setErr(up.error.message); }
+    const url = supabase.storage.from("avatars").getPublicUrl(path).data.publicUrl + `?t=${Date.now()}`;
+    const u = await supabase.from("profiles").update({ avatar_url: url }).eq("id", me.id);
+    setBusy(false); if (u.error) setErr(u.error.message); else reload();
+  }
+  return (
+    <div className="px-5 pt-10 text-center">
+      <label className="relative mx-auto block h-28 w-28 cursor-pointer">
+        {me.avatar_url
+          // eslint-disable-next-line @next/next/no-img-element
+          ? <img src={me.avatar_url} alt="Profile" className="h-28 w-28 rounded-full object-cover" />
+          : <span className="flex h-28 w-28 items-center justify-center rounded-full bg-ink text-4xl font-bold text-white">{me.username[0].toUpperCase()}</span>}
+        <span className="absolute bottom-0 right-0 rounded-full bg-coin px-2.5 py-1 text-xs font-semibold">{busy ? "..." : "Edit"}</span>
+        <input type="file" accept="image/*" onChange={upload} className="sr-only" />
+      </label>
+      <h1 className="mt-4 text-2xl font-bold">@{me.username}</h1>
+      <p className="text-muted">{fmt(me.coins)} coins</p>
+      <Err t={err} />
+      <button onClick={() => supabase.auth.signOut()} className="mt-6 w-full rounded-xl border border-line bg-white py-3 font-medium">Log out</button>
+      {me.is_admin && <Admin />}
+    </div>
+  );
+}
+
+function Admin() {
+  const [rows, setRows] = useState<any[]>([]); const [err, setErr] = useState("");
+  const load = async () => { const r = await supabase.rpc("admin_pending"); setRows(r.data ?? []); };
+  useEffect(() => { load(); }, []);
+  async function review(utr: string, ok: boolean) {
+    const { error } = await supabase.rpc("review_utr", { p_utr: utr, p_approve: ok });
+    if (error) setErr(error.message); else load();
+  }
+  return (
+    <div className="mt-8 text-left">
+      <h2 className="text-xl font-bold">Pending payments</h2>
+      <p className="text-sm text-muted">Match UTR and 
