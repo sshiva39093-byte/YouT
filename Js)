@@ -1,0 +1,12 @@
+module.exports = {
+  content: ["./app/**/*.{ts,tsx}"],
+  theme: {
+    extend: {
+      colors: {
+        ink: "#14213D", canvas: "#F3F5F8", line: "#E1E5EC", muted: "#5B6679",
+        coin: { DEFAULT: "#F2A31B", dark: "#B9770A", soft: "#FEF3DC" },
+        ok: "#1F9D74", bad: "#D64545",
+      },
+    },
+  },
+};
